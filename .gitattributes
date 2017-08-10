@@ -1,0 +1,6 @@
+* text eol=crlf
+
+*.BMP binary
+*.bmp binary
+*.MV binary
+*.mv binary
