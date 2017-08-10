@@ -1,0 +1,2 @@
+motzak.exe: motzak.c txtui.c keyb.c
+	tcc -ml motzak.c txtui.c keyb.c
