@@ -11,6 +11,7 @@
 
 #define COMPOSE_MODE 0
 #define PARAMS_MODE 1
+#define PLAY_MODE 2
 
 #define PARAMS_COUNT 6
 #define OPERATOR_COUNT 2
@@ -238,6 +239,34 @@ int just_released(int keycode) {
     return !test_keybuf(keystates, keycode) && test_keybuf(old_keystates, keycode);
 }
 
+void swap_notes(int a, int b) {
+    note holder = song_buf[b];
+    song_buf[b] = song_buf[a];
+    song_buf[a] = holder;
+}
+
+/*1 if a>b 0 otherwise*/
+int compare_notes(int a, int b) {
+    if(song_buf[a].channel == 0 && song_buf[b].channel != 0) return 1;
+    if(song_buf[a].channel != 0 && song_buf[b].channel == 0) return 0;
+    if(song_buf[a].step > song_buf[b].step) return 1;
+    return 0;
+}
+
+void sort_song() {
+    int i, j, didswap;
+    for(i=0; i < song_buf_size-1; i++) {
+        didswap=0;
+        for(j=0; j<song_buf_size-i-1;j++) {
+            if(compare_notes(j, j+1)) {
+                swap_notes(j, j+1);
+                didswap=1;
+            }
+        }
+        if(!didswap) break;
+    }
+}
+
 void save_song() {
     FILE *write_ptr;
     char filename_str_ext[12];
@@ -250,6 +279,7 @@ void save_song() {
     filename_str_ext[i++] = 'M';
     filename_str_ext[i++] = 'Z';
     filename_str_ext[i++] = 0;
+    sort_song();
     for(i = 0; i < song_buf_size; i ++) {
         if(song_buf[i].channel == 0) break;
     }
@@ -294,8 +324,12 @@ void load_song() {
 }
 
 int main(int argc, char** argv) {
-    int i, redraw_roll = 0, redraw_top = 0, redraw_keys = 0, redraw_params = 0;
+    int i, redraw_roll = 0, redraw_top = 0, redraw_keys = 0, redraw_params = 0, steptimer = 0, playindex = 0;
+    unsigned short start;
+    unsigned short *my_clock = (unsigned short *)0x0000046C;
+    unsigned short frame_duration;
 
+    start = *my_clock;
     /*read and clean up song name argument*/
     if(argc == 2) {
         for(i = 0; i < 8; i ++) {
@@ -321,6 +355,8 @@ int main(int argc, char** argv) {
     Sb_FM_Reset();
 
     WriteFM(0, 1, 1 << 5);
+    WriteFM(0, 2, 0);
+    WriteFM(0, 4, 1);
 
     for(i = 0; i < 10; i++) {
         FM_Instrument defaultstrument = {
@@ -346,6 +382,8 @@ int main(int argc, char** argv) {
 
     clear_keybuf(keystates);
     while(!test_keybuf(keystates, KEY_ESC)) {
+        frame_duration = (*my_clock - start); /*IN UNITS OF 18.2 PER SECOND*/
+        start = *my_clock;
         memcpy(old_keystates, keystates, 32);
         get_keys_hit(keystates);
         redraw_top = 0;
@@ -421,9 +459,9 @@ int main(int argc, char** argv) {
                     }
                     
                 }
-                redraw_roll |= 1;
-                redraw_top |= 1;
-                file_dirty |= 1;
+                redraw_roll = 1;
+                redraw_top = 1;
+                file_dirty = 1;
             }
 
             if(just_pressed(KEY_F2) && file_dirty) {
@@ -434,6 +472,16 @@ int main(int argc, char** argv) {
             if(just_pressed(KEY_TAB)) {
                 interface_mode = PARAMS_MODE;
                 redraw_params = 1;
+            }
+
+            if(just_pressed(KEY_ENTER)) {
+                interface_mode = PLAY_MODE;
+                cursor_beat = 0;
+                scroll_beat = 0;
+                steptimer = 0;
+                playindex = 0;
+                sort_song();
+                file_dirty = 1;
             }
         } else if(interface_mode == PARAMS_MODE) {
             if(just_pressed(KEY_TAB)) {
@@ -483,6 +531,29 @@ int main(int argc, char** argv) {
                 Sb_FM_Key_On(cursor_channel-1, note_fnums[cursor_note], note_octaves[cursor_note]);
             } else if(just_released(KEY_SPACE)) {
                 Sb_FM_Key_Off(cursor_channel-1);
+            }
+        } else if(interface_mode == PLAY_MODE) {
+            if(just_pressed(KEY_ENTER)) {
+                interface_mode = COMPOSE_MODE;
+            }
+
+            while(song_buf[playindex].step < cursor_beat && song_buf[playindex].channel != 0) {
+                Sb_FM_Key_Off(song_buf[playindex].channel-1);
+                Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
+                playindex++;
+                if(song_buf[playindex].channel == 0) {
+                    interface_mode = COMPOSE_MODE;
+                    break;
+                }
+            }
+
+            steptimer += frame_duration;
+            if(steptimer > 1092 / tempo) {
+                steptimer -= (1092 / tempo);
+                cursor_beat++;
+                scroll_beat++;
+                redraw_top = 1;
+                redraw_roll = 1;
             }
         }
 
