@@ -9,8 +9,25 @@
 
 #define NOTE_CHAR 13
 
+#define COMPOSE_MODE 0
+#define PARAMS_MODE 1
+
+#define PARAMS_COUNT 6
+#define OPERATOR_COUNT 2
+
 char keystates[32];
 char old_keystates[32];
+
+const char *param_names[] = {
+    "HARMONIC",
+    "VOLUME  ",
+    "ATK/DECY",
+    "SUST/REL",
+    "WAVEFORM",
+    "FEEDBACK"
+};
+
+int interface_mode = COMPOSE_MODE;
 
 int meter_num = 4;
 int meter_dnm = 4;
@@ -24,12 +41,15 @@ int cursor_beat = 0;
 int cursor_channel = 1;
 int highlight_channels=0;
 int cursor_note = 57;
+int cursor_duration = 1;
+int cursor_param = 0;
 
 int black_notes[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 
 char meter_str[8];
 char tempo_str[8];
 char cursor_str[10];
+char duration_str[4];
 
 char filename_str[8] = "UNTITLED";
 
@@ -88,7 +108,8 @@ void create_cursor_note() {
     if(new_note_ind != -1) {
         song_buf[new_note_ind].pitch = cursor_note;
         song_buf[new_note_ind].step = cursor_beat;
-        song_buf[new_note_ind].channel = cursor_channel;    
+        song_buf[new_note_ind].channel = cursor_channel;   
+        song_buf[new_note_ind].duration = cursor_duration; 
     }
 }
 
@@ -150,7 +171,7 @@ void render_top_bar() {
     sprintf(meter_str, "%02d/%02d ", meter_num, meter_dnm);
     sprintf(tempo_str, "%03d   ", tempo);
     sprintf(cursor_str, "%04d:%03d", (cursor_beat / steps_per_beat) / meter_num, (cursor_beat / steps_per_beat) % meter_num);
-
+    sprintf(duration_str, "  %02d", cursor_duration);
     while(i < 8 && filename_str[i] != 0) {
         i++;
     }
@@ -159,6 +180,7 @@ void render_top_bar() {
     if(file_dirty)
         write_string("*", i+3, 0, 1, 0);
     write_string("1234567890", 24 , 0, 10, 0);
+    write_string(duration_str, 36, 0, 4, 0);
     write_string(meter_str, 56, 0, 6, 0);
     write_string(tempo_str, 64, 0, 4, 0);
     write_string(cursor_str, 72, 0, 8, 0);
@@ -174,8 +196,46 @@ void render_top_bar() {
     colorat(24 + (cursor_channel+9) % 10, 0) += 0x80;
 }
 
+char hex_char(int num) {
+    if(num < 10) {
+        return '0' + num;
+    } else {
+        return 'A' + (num - 10);
+    }
+}
+
+void render_params_window() {
+    int i, j;
+    char bytenum[4];
+    clear_box(64, 1, 16, 24);
+    paint_box(64, 1, 16, 24, 0x30);
+    draw_box(64, 1, 16, 24, 0x33 + cursor_channel);
+
+    for(i = 0; i < PARAMS_COUNT; i ++) {
+        write_string(param_names[i], 66, 2 + i * (OPERATOR_COUNT + 1), 8, (cursor_param / OPERATOR_COUNT == i) ? 0x1F : 0x30);
+        for(j = 0; j < OPERATOR_COUNT; j++) {
+            unsigned char *inst_param = (char*) &instruments[cursor_channel-1];
+            inst_param += i * OPERATOR_COUNT + j;
+            paint_box(76, 2 + i * (OPERATOR_COUNT + 1) + j, 2, 1, cursor_param == (i * OPERATOR_COUNT + j) ? 0x0F : 0x07);
+            charat(76, 2 + i * (OPERATOR_COUNT + 1) + j) = hex_char(*inst_param >> 4);
+            charat(77, 2 + i * (OPERATOR_COUNT + 1) + j) = hex_char(*inst_param % 16);
+        }
+    }
+}
+
+void adjust_instrument(int amount) {
+    char *inst_param = (char*) &instruments[cursor_channel-1];
+    inst_param += cursor_param;
+    *inst_param += amount;
+    Sb_FM_Set_Voice(cursor_channel-1, &instruments[cursor_channel-1]);
+}
+
 int just_pressed(int keycode) {
     return test_keybuf(keystates, keycode) && !test_keybuf(old_keystates, keycode);
+}
+
+int just_released(int keycode) {
+    return !test_keybuf(keystates, keycode) && test_keybuf(old_keystates, keycode);
 }
 
 void save_song() {
@@ -234,7 +294,7 @@ void load_song() {
 }
 
 int main(int argc, char** argv) {
-    int i, redraw_roll = 0, redraw_top = 0, redraw_keys = 0;
+    int i, redraw_roll = 0, redraw_top = 0, redraw_keys = 0, redraw_params = 0;
 
     /*read and clean up song name argument*/
     if(argc == 2) {
@@ -291,13 +351,15 @@ int main(int argc, char** argv) {
         redraw_top = 0;
         redraw_roll = 0;
         redraw_keys = 0;
-        for(i = 0; i < 10; i++) {
-            if(just_pressed(KEY_1 + i)) {
-                cursor_channel = i+1;
-                redraw_top = 1;
+        redraw_params = 0;
+        if(interface_mode == COMPOSE_MODE) {
+            for(i = 0; i < 10; i++) {
+                if(just_pressed(KEY_1 + i)) {
+                    cursor_channel = i+1;
+                    redraw_top = 1;
+                }
             }
-        }
-        if(just_pressed(KEY_UP)) {
+            if(just_pressed(KEY_UP)) {
                     if(cursor_beat > 0) {
                         cursor_beat--;
                         if(test_keybuf(keystates, KEY_LSHIFT)) {
@@ -333,6 +395,16 @@ int main(int argc, char** argv) {
                 redraw_keys = 1;
             }
 
+            if(just_pressed(KEY_EQUALS)) {
+                if(cursor_duration < 16) cursor_duration++;
+                redraw_top = 1;
+            }
+
+            if(just_pressed(KEY_MINUS)) {
+                if(cursor_duration > 1) cursor_duration--;
+                redraw_top = 1;
+            }
+
             if(just_pressed(KEY_SPACE)) {
                 int noteind = get_note_index(cursor_beat, cursor_channel);
                 if(noteind == -1) {
@@ -359,9 +431,65 @@ int main(int argc, char** argv) {
                 redraw_top = 1;
             }
 
-            if(redraw_roll) render_piano_roll();
-            if(redraw_top) render_top_bar();
-            if(redraw_keys) render_piano_keyboard();
+            if(just_pressed(KEY_TAB)) {
+                interface_mode = PARAMS_MODE;
+                redraw_params = 1;
+            }
+        } else if(interface_mode == PARAMS_MODE) {
+            if(just_pressed(KEY_TAB)) {
+                interface_mode = COMPOSE_MODE;
+                redraw_roll = 1;
+                redraw_keys = 1;
+            }
+            for(i = 0; i < 10; i++) {
+                if(just_pressed(KEY_1 + i)) {
+                    cursor_channel = i+1;
+                    redraw_top = 1;
+                    redraw_params = 1;
+                }
+            }
+            if(just_pressed(KEY_UP)) {
+                if(cursor_param > 0) {
+                    cursor_param --;
+                    redraw_params = 1;
+                }
+            }
+            if(just_pressed(KEY_DOWN)) {
+                if(cursor_param < (PARAMS_COUNT * OPERATOR_COUNT - 1)) {
+                    cursor_param ++;
+                    redraw_params = 1;
+                }
+            }
+
+            if(just_pressed(KEY_LEFT)) {
+                int adjust_amount = -1;
+                if(test_keybuf(keystates, KEY_LSHIFT)) {
+                    adjust_amount = -16;
+                }
+                adjust_instrument(adjust_amount);
+                redraw_params = 1;
+            }
+
+            if(just_pressed(KEY_RIGHT)) {
+                int adjust_amount = 1;
+                if(test_keybuf(keystates, KEY_LSHIFT)) {
+                    adjust_amount = 16;
+                }
+                adjust_instrument(adjust_amount);
+                redraw_params = 1;
+            }
+
+            if(just_pressed(KEY_SPACE)) {
+                Sb_FM_Key_On(cursor_channel-1, note_fnums[cursor_note], note_octaves[cursor_note]);
+            } else if(just_released(KEY_SPACE)) {
+                Sb_FM_Key_Off(cursor_channel-1);
+            }
+        }
+
+        if(redraw_roll) render_piano_roll();
+        if(redraw_top) render_top_bar();
+        if(redraw_keys) render_piano_keyboard();
+        if(redraw_params) render_params_window();
     }
     deinit_keyboard();
     return 0;
