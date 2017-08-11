@@ -119,7 +119,8 @@ void render_piano_roll() {
     int x, y, i;
     clear_box(0, 2, 80, 23);
     paint_box(0, 2, 80, 23, 0x07);
-    for(y = 2 + (scroll_beat % (meter_num * steps_per_beat)); y < 25; y+= meter_num * steps_per_beat) {
+    for(y = 2 - (scroll_beat % (meter_num * steps_per_beat)); y < 25; y+= meter_num * steps_per_beat) {
+        if(y < 2) continue;
         for(x = 0; x < 80; x++) {
             charat(x, y) = 0xFA;
         }
@@ -382,10 +383,12 @@ int main(int argc, char** argv) {
 
     clear_keybuf(keystates);
     while(!test_keybuf(keystates, KEY_ESC)) {
+        int shift_held;
         frame_duration = (*my_clock - start); /*IN UNITS OF 18.2 PER SECOND*/
         start = *my_clock;
         memcpy(old_keystates, keystates, 32);
         get_keys_hit(keystates);
+        shift_held = test_keybuf(keystates, KEY_LSHIFT) || test_keybuf(keystates, KEY_RSHIFT);
         redraw_top = 0;
         redraw_roll = 0;
         redraw_keys = 0;
@@ -400,7 +403,7 @@ int main(int argc, char** argv) {
             if(just_pressed(KEY_UP)) {
                     if(cursor_beat > 0) {
                         cursor_beat--;
-                        if(test_keybuf(keystates, KEY_LSHIFT)) {
+                        if(shift_held) {
                             cursor_beat -= meter_num - 1;
                             if(cursor_beat < 0) cursor_beat = 0;
                         }
@@ -413,7 +416,7 @@ int main(int argc, char** argv) {
             }
             if(just_pressed(KEY_DOWN)) {
                 cursor_beat++;
-                if(test_keybuf(keystates, KEY_LSHIFT)) cursor_beat+= meter_num - 1;
+                if(shift_held) cursor_beat+= meter_num - 1;
                 if(cursor_beat >= scroll_beat+23) {
                     scroll_beat = cursor_beat - 22;
                 }
@@ -434,12 +437,20 @@ int main(int argc, char** argv) {
             }
 
             if(just_pressed(KEY_EQUALS)) {
-                if(cursor_duration < 16) cursor_duration++;
+                if(shift_held) {
+                    if(tempo < 999) tempo++;
+                } else {
+                    if(cursor_duration < 16) cursor_duration++;
+                }
                 redraw_top = 1;
             }
 
             if(just_pressed(KEY_MINUS)) {
-                if(cursor_duration > 1) cursor_duration--;
+                if(shift_held) {
+                    if(tempo > 10) tempo --;
+                } else {
+                    if(cursor_duration > 1) cursor_duration--;
+                }
                 redraw_top = 1;
             }
 
@@ -511,7 +522,7 @@ int main(int argc, char** argv) {
 
             if(just_pressed(KEY_LEFT)) {
                 int adjust_amount = -1;
-                if(test_keybuf(keystates, KEY_LSHIFT)) {
+                if(shift_held) {
                     adjust_amount = -16;
                 }
                 adjust_instrument(adjust_amount);
@@ -520,7 +531,7 @@ int main(int argc, char** argv) {
 
             if(just_pressed(KEY_RIGHT)) {
                 int adjust_amount = 1;
-                if(test_keybuf(keystates, KEY_LSHIFT)) {
+                if(shift_held) {
                     adjust_amount = 16;
                 }
                 adjust_instrument(adjust_amount);
