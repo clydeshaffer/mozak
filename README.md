@@ -24,14 +24,15 @@
 
 the DOS sound blaster tracker no one asked for
 
-##Keyboard commands:
+## Keyboard commands:
 
-###All modes
+### All modes
+
 |Key|Action|
 |:--|-----:|
 |Esc|exit the program|
 
-###Compose mode
+### Compose mode
 
 |Key|Action|
 |:--|-----:|
