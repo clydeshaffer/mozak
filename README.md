@@ -47,7 +47,7 @@ the DOS sound blaster tracker no one asked for
 
 
 
-###Instrument Edit mode
+### Instrument Edit mode
 
 |Key|Action|
 |:--|-----:|
