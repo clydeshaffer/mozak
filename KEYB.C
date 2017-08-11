@@ -124,9 +124,12 @@ void get_keys_hit(char *keybuf) {
 
          was_released = !!(key_event & KEY_RELEASED);
          key_event = key_event & ~KEY_RELEASED;
-         
+
          if(!was_released)
             keybuf[key_event >> 3] |= 1 << (key_event & 7);
+         else {
+            keybuf[key_event >> 3] &= ~(1 << (key_event & 7));
+         }
 
          gb_scan_head++;
       
@@ -139,4 +142,12 @@ void clear_keybuf(char *keybuf) {
 
 int test_keybuf(char *keybuf, int keycode) {
    return keybuf[keycode >> 3] & 1 << (keycode & 7);
+}
+
+void disable_repeat()
+{
+    union REGS regs;
+    regs.h.ah = 0x03;
+    regs.h.al = 0x04;
+    int86(0x16, &regs, &regs);
 }

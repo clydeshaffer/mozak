@@ -58,4 +58,13 @@ void paint_box(int x, int y, int width, int height, char color) {
     }
 }
 
+void clear_box(int x, int y, int width, int height) {
+    int i, j;
+    for(i = 0; i < width; i++) {
+        for(j = 0; j < height; j++) {
+            charat(x+i, y+j) = 0;
+        }
+    }
+}
+
 

@@ -12,6 +12,8 @@ void draw_box(int x, int y, int width, int height, char color);
 
 void paint_box(int x, int y, int width, int height, char color);
 
+void clear_box(int x, int y, int width, int height);
+
 extern char far *txtmem;
 
 #endif
