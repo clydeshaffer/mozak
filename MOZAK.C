@@ -3,6 +3,7 @@
 
 #include "TXTUI.h"
 #include "keycodes.h"
+#include "blaster.h"
 
 #define BOTTOM_NOTE 21
 
@@ -43,15 +44,17 @@ typedef struct note {
 note song_buf[512];
 int song_buf_size = 512;
 
+FM_Instrument instruments[10];
+
 /* notenum halfsteps from C0 */
 int is_black_note(int notenum) {
     return black_notes[notenum % 12];
 }
 
-int get_note_index(int pitch, int step, int channel) {
+int get_note_index(int step, int channel) {
     int i;
     for(i = 0; i < song_buf_size; i++) {
-        if(song_buf[i].channel == channel && song_buf[i].step == step && song_buf[i].pitch == pitch) {
+        if(song_buf[i].channel == channel && song_buf[i].step == step) {
             return i;
         }  
     }
@@ -76,6 +79,7 @@ note create_default_note() {
     default_note.pitch = 57;
     default_note.step = 0;
     default_note.volume = 0xFF;
+    default_note.duration = 1;
     return default_note;
 }
 
@@ -174,23 +178,108 @@ int just_pressed(int keycode) {
     return test_keybuf(keystates, keycode) && !test_keybuf(old_keystates, keycode);
 }
 
+void save_song() {
+    FILE *write_ptr;
+    char filename_str_ext[12];
+    int i;
+    for(i = 0; i < 8; i++) {
+        if(filename_str[i] == 0) break;
+        filename_str_ext[i] = filename_str[i];
+    }
+    filename_str_ext[i++] = '.';
+    filename_str_ext[i++] = 'M';
+    filename_str_ext[i++] = 'Z';
+    filename_str_ext[i++] = 0;
+    for(i = 0; i < song_buf_size; i ++) {
+        if(song_buf[i].channel == 0) break;
+    }
+    write_ptr = fopen(filename_str_ext, "wb");
+    fwrite(instruments, sizeof(FM_Instrument), 10, write_ptr);
+    fwrite(song_buf, sizeof(note), i, write_ptr);
+    fclose(write_ptr);
+    file_dirty = 0;
+}
+
+void load_song() {
+    FILE *read_ptr = NULL;
+    char filename_str_ext[12];
+    int i;
+    printf("lets load the song\n");
+    for(i = 0; i < 8; i++) {
+        if(filename_str[i] == 0) break;
+        filename_str_ext[i] = filename_str[i];
+    }
+    printf("ok, so title is %d chars long\n", i);
+    filename_str_ext[i++] = '.';
+    filename_str_ext[i++] = 'M';
+    filename_str_ext[i++] = 'Z';
+    filename_str_ext[i++] = 0;
+    printf("filename is %s\n", filename_str_ext);
+    read_ptr = fopen(filename_str_ext, "rb");
+    if(read_ptr == NULL) return;
+    for(i = 0; i < song_buf_size; i++) {
+        song_buf[i].channel = 0;
+    }
+    printf("song memory cleared, let's begin\n");
+    fread(instruments, sizeof(FM_Instrument), 10, read_ptr);
+    for(i = 0; i < song_buf_size; i++) {
+        if(fread(&song_buf[i], sizeof(note), 1, read_ptr) == 0) break;
+    }
+    printf("loaded %d notes\n", i);
+    fclose(read_ptr);
+
+    for(i = 0; i < 10; i ++) {
+        Sb_FM_Set_Voice(i, &instruments[i]);
+    }
+}
+
 int main(int argc, char** argv) {
     int i, redraw_roll = 0, redraw_top = 0, redraw_keys = 0;
+
+    /*read and clean up song name argument*/
+    if(argc == 2) {
+        for(i = 0; i < 8; i ++) {
+            if(argv[1][i] == '.') {
+                filename_str[i] = 0;
+                break;
+            }
+            filename_str[i] = argv[1][i];
+        }
+    }
+
 
     memset(keystates, 0, 32);
 
     init_keyboard();
-    if(song_buf != NULL) {
-        for(i = 0; i < song_buf_size; i++) {
-            song_buf[i].channel = 0;
-        }
-    } else {
-        printf("error, song_buf malloced as null");
+
+    for(i = 0; i < song_buf_size; i++) {
+        song_buf[i].channel = 0;
     }
+
+    Sb_Get_Params();
+
+    Sb_FM_Reset();
+
+    WriteFM(0, 1, 1 << 5);
+
+    for(i = 0; i < 10; i++) {
+        FM_Instrument defaultstrument = {
+            0x00, 0x01, 0x10, 0x00,
+            0xf0, 0xf8, 0x77, 0x77,
+            0x00, 0x00, 0x00, 0x00,
+            0x98, 0x00, 0x00, 0x31 
+        };
+        instruments[i] = defaultstrument;
+        Sb_FM_Set_Voice(i, &instruments[i]);
+    }
+
+    /*attempt load song*/
+    load_song();
 
     clear_screen(0x07);
 
     
+
     render_piano_keyboard();
     render_piano_roll();
     render_top_bar();
@@ -245,22 +334,28 @@ int main(int argc, char** argv) {
             }
 
             if(just_pressed(KEY_SPACE)) {
-                char cursor_char = charat(cursor_note - BOTTOM_NOTE, cursor_beat - scroll_beat + 2);
-                if(cursor_char == NOTE_CHAR || cursor_char == NOTE_CHAR+1) {
-                    int noteind = get_note_index(cursor_note, cursor_beat, cursor_channel);
-                    if(noteind == -1) {
-                        /*marked note belongs to another channel
-                            so add one from cursor channel*/
-                        create_cursor_note();
-                    } else {
-                        /*remove the note found*/
-                        song_buf[noteind].channel = 0;
-                    }
-                } else {
-                    /* no notes should be here so add one to list*/
+                int noteind = get_note_index(cursor_beat, cursor_channel);
+                if(noteind == -1) {
                     create_cursor_note();
+                    Sb_FM_Key_Off(cursor_channel-1);
+                    Sb_FM_Key_On(cursor_channel-1, note_fnums[cursor_note], note_octaves[cursor_note]);
+                } else {
+                    if(cursor_note == song_buf[noteind].pitch) {
+                        song_buf[noteind].channel = 0;
+                    } else {
+                        song_buf[noteind].pitch = cursor_note;
+                        Sb_FM_Key_Off(cursor_channel-1);
+                        Sb_FM_Key_On(cursor_channel-1, note_fnums[cursor_note], note_octaves[cursor_note]);
+                    }
+                    
                 }
-                redraw_roll = 1;
+                redraw_roll |= 1;
+                redraw_top |= 1;
+                file_dirty |= 1;
+            }
+
+            if(just_pressed(KEY_F2) && file_dirty) {
+                save_song();
                 redraw_top = 1;
             }
 

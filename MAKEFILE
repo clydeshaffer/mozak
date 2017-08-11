@@ -1,2 +1,2 @@
-mozak.exe: mozak.c txtui.c keyb.c
-	tcc -ml mozak.c txtui.c keyb.c
+mozak.exe: mozak.c txtui.c keyb.c blaster.c
+	tcc -ml mozak.c txtui.c keyb.c blaster.c
