@@ -285,6 +285,7 @@ void save_song() {
         if(song_buf[i].channel == 0) break;
     }
     write_ptr = fopen(filename_str_ext, "wb");
+    fwrite(&tempo, sizeof(tempo), 1, write_ptr);
     fwrite(instruments, sizeof(FM_Instrument), 10, write_ptr);
     fwrite(song_buf, sizeof(note), i, write_ptr);
     fclose(write_ptr);
@@ -312,6 +313,7 @@ void load_song() {
         song_buf[i].channel = 0;
     }
     printf("song memory cleared, let's begin\n");
+    fread(&tempo, sizeof(tempo), 1, read_ptr);
     fread(instruments, sizeof(FM_Instrument), 10, read_ptr);
     for(i = 0; i < song_buf_size; i++) {
         if(fread(&song_buf[i], sizeof(note), 1, read_ptr) == 0) break;
