@@ -425,12 +425,16 @@ int main(int argc, char** argv) {
             }
             if(just_pressed(KEY_LEFT)) {
                 cursor_note--;
+                if(shift_held) cursor_note -= 11;
+                if(cursor_note < BOTTOM_NOTE) cursor_note = BOTTOM_NOTE;
                 redraw_roll = 1;
                 redraw_top = 1;
                 redraw_keys = 1;
             }
             if(just_pressed(KEY_RIGHT)) {
                 cursor_note++;
+                if(shift_held) cursor_note += 11;
+                if(cursor_note >= BOTTOM_NOTE + 80) cursor_note = BOTTOM_NOTE + 79;
                 redraw_roll = 1;
                 redraw_top = 1;
                 redraw_keys = 1;
