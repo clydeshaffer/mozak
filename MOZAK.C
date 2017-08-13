@@ -460,6 +460,7 @@ int main(int argc, char** argv) {
                 } else {
                     if(cursor_duration < 16) cursor_duration++;
                 }
+                file_dirty = 1;
                 redraw_top = 1;
             }
 
@@ -469,6 +470,7 @@ int main(int argc, char** argv) {
                 } else {
                     if(cursor_duration > 1) cursor_duration--;
                 }
+                file_dirty = 1;
                 redraw_top = 1;
             }
 
@@ -505,8 +507,8 @@ int main(int argc, char** argv) {
 
             if(just_pressed(KEY_ENTER)) {
                 interface_mode = PLAY_MODE;
-                cursor_beat = 0;
-                scroll_beat = 0;
+                if(shift_held) scroll_beat = 0;
+                cursor_beat = scroll_beat;
                 steptimer = 0;
                 playindex = 0;
                 sort_song();
@@ -567,6 +569,9 @@ int main(int argc, char** argv) {
             }
 
             while(song_buf[playindex].step < cursor_beat && song_buf[playindex].channel != 0) {
+                playindex++;
+            }
+            while(song_buf[playindex].step == cursor_beat && song_buf[playindex].channel != 0) {
                 Sb_FM_Key_Off(song_buf[playindex].channel-1);
                 Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
                 playindex++;
