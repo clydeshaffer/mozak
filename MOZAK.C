@@ -16,6 +16,8 @@
 #define PARAMS_COUNT 6
 #define OPERATOR_COUNT 2
 
+char format_version = 0x02;
+
 char keystates[32];
 char old_keystates[32];
 
@@ -285,6 +287,7 @@ void save_song() {
         if(song_buf[i].channel == 0) break;
     }
     write_ptr = fopen(filename_str_ext, "wb");
+    fwrite(&format_version, sizeof(format_version), 1, write_ptr);
     fwrite(&tempo, sizeof(tempo), 1, write_ptr);
     fwrite(instruments, sizeof(FM_Instrument), 10, write_ptr);
     fwrite(song_buf, sizeof(note), i, write_ptr);
@@ -296,6 +299,7 @@ void load_song() {
     FILE *read_ptr = NULL;
     char filename_str_ext[12];
     int i;
+    char loadversion;
     printf("lets load the song\n");
     for(i = 0; i < 8; i++) {
         if(filename_str[i] == 0) break;
@@ -313,7 +317,15 @@ void load_song() {
         song_buf[i].channel = 0;
     }
     printf("song memory cleared, let's begin\n");
+
+    /*check file format version*/
+    fread(&loadversion, sizeof(loadversion), 1, read_ptr);
+
+    /*REMEMBER! When adding things here, increment version
+    and only load params from correct versions*/
+
     fread(&tempo, sizeof(tempo), 1, read_ptr);
+
     fread(instruments, sizeof(FM_Instrument), 10, read_ptr);
     for(i = 0; i < song_buf_size; i++) {
         if(fread(&song_buf[i], sizeof(note), 1, read_ptr) == 0) break;
