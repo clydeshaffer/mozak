@@ -12,6 +12,7 @@
 #define COMPOSE_MODE 0
 #define PARAMS_MODE 1
 #define PLAY_MODE 2
+#define QUIT_MODE 3
 
 #define PARAMS_COUNT 6
 #define OPERATOR_COUNT 2
@@ -30,7 +31,14 @@ const char *param_names[] = {
     "FEEDBACK"
 };
 
+int prev_mode = COMPOSE_MODE;
 int interface_mode = COMPOSE_MODE;
+
+void switch_mode(int state) {
+    if(state == interface_mode) return;
+    prev_mode = interface_mode;
+    interface_mode = state;
+}
 
 int meter_num = 4;
 int meter_dnm = 4;
@@ -200,6 +208,13 @@ void render_top_bar() {
     colorat(24 + (cursor_channel+9) % 10, 0) += 0x80;
 }
 
+int render_quit_confirm() {
+    /*26 chars long*/
+    char confirm_text[] = "QUIT WITHOUT SAVING? (Y/N)";
+    draw_box(26, 11, 28, 3, 0x30);
+    write_string(confirm_text, 27, 12, 26, 0x30);
+}
+
 char hex_char(int num) {
     if(num < 10) {
         return '0' + num;
@@ -339,10 +354,17 @@ void load_song() {
 }
 
 int main(int argc, char** argv) {
-    int i, redraw_roll = 0, redraw_top = 0, redraw_keys = 0, redraw_params = 0, steptimer = 0, playindex = 0;
+    int i, redraw_roll = 0, 
+            redraw_top = 0, 
+            redraw_keys = 0, 
+            redraw_params = 0, 
+            redraw_quit = 0,
+            steptimer = 0, 
+            playindex = 0;
     unsigned short start;
     unsigned short *my_clock = (unsigned short *)0x0000046C;
     unsigned short frame_duration;
+    int do_exit = 0;
 
     start = *my_clock;
     /*read and clean up song name argument*/
@@ -396,7 +418,7 @@ int main(int argc, char** argv) {
     render_top_bar();
 
     clear_keybuf(keystates);
-    while(!test_keybuf(keystates, KEY_ESC)) {
+    while(!do_exit) {
         int shift_held;
         frame_duration = (*my_clock - start); /*IN UNITS OF 18.2 PER SECOND*/
         start = *my_clock;
@@ -407,6 +429,7 @@ int main(int argc, char** argv) {
         redraw_roll = 0;
         redraw_keys = 0;
         redraw_params = 0;
+        redraw_quit = 0;
         if(interface_mode == COMPOSE_MODE) {
             for(i = 0; i < 10; i++) {
                 if(just_pressed(KEY_1 + i)) {
@@ -501,12 +524,12 @@ int main(int argc, char** argv) {
             }
 
             if(just_pressed(KEY_TAB)) {
-                interface_mode = PARAMS_MODE;
+                switch_mode(PARAMS_MODE);
                 redraw_params = 1;
             }
 
             if(just_pressed(KEY_ENTER)) {
-                interface_mode = PLAY_MODE;
+                switch_mode(PLAY_MODE);
                 if(shift_held) scroll_beat = 0;
                 cursor_beat = scroll_beat;
                 steptimer = 0;
@@ -516,7 +539,7 @@ int main(int argc, char** argv) {
             }
         } else if(interface_mode == PARAMS_MODE) {
             if(just_pressed(KEY_TAB)) {
-                interface_mode = COMPOSE_MODE;
+                switch_mode(COMPOSE_MODE);
                 redraw_roll = 1;
                 redraw_keys = 1;
             }
@@ -565,7 +588,7 @@ int main(int argc, char** argv) {
             }
         } else if(interface_mode == PLAY_MODE) {
             if(just_pressed(KEY_ENTER)) {
-                interface_mode = COMPOSE_MODE;
+                switch_mode(COMPOSE_MODE);
             }
 
             while(song_buf[playindex].step < cursor_beat && song_buf[playindex].channel != 0) {
@@ -576,7 +599,7 @@ int main(int argc, char** argv) {
                 Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
                 playindex++;
                 if(song_buf[playindex].channel == 0) {
-                    interface_mode = COMPOSE_MODE;
+                    switch_mode(COMPOSE_MODE);
                     break;
                 }
             }
@@ -589,14 +612,39 @@ int main(int argc, char** argv) {
                 redraw_top = 1;
                 redraw_roll = 1;
             }
+        } else if(interface_mode == QUIT_MODE) {
+            if(file_dirty) {
+                if(just_pressed(KEY_Y)) {
+                    do_exit = 1;
+                }
+                if(just_pressed(KEY_N)) {
+                    do_exit = 0;
+                    switch_mode(prev_mode);
+                    redraw_roll = 1;
+                }
+            } else {
+                do_exit = 1;
+            }
+        }
+
+        if(interface_mode != QUIT_MODE) {
+            if(just_pressed(KEY_ESC)) {
+                switch_mode(QUIT_MODE);
+                redraw_quit = file_dirty;
+            }
         }
 
         if(redraw_roll) render_piano_roll();
         if(redraw_top) render_top_bar();
         if(redraw_keys) render_piano_keyboard();
         if(redraw_params) render_params_window();
+        if(redraw_quit) render_quit_confirm();
     }
     deinit_keyboard();
+    for(i = 0; i < 25; i ++) {
+        printf("\n");
+    }
+    printf("Thanks for using MOZAK!");
     return 0;
 }
 
