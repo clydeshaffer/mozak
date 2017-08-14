@@ -82,11 +82,6 @@ int cursor_param = 0;
 
 int black_notes[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 
-char meter_str[8];
-char tempo_str[8];
-char cursor_str[10];
-char duration_str[4];
-
 char filename_str[8] = "UNTITLED";
 
 typedef struct note {
@@ -99,6 +94,7 @@ typedef struct note {
 
 note song_buf[512];
 int song_buf_size = 512;
+int note_count = 0;
 
 FM_Instrument instruments[10];
 
@@ -122,6 +118,7 @@ int create_note(note newnote) {
     for(i = 0; i < song_buf_size; i++) {
         if(song_buf[i].channel == 0) {
             song_buf[i] = newnote;
+            note_count++;
             return i;
         }  
     }
@@ -204,11 +201,17 @@ void render_piano_keyboard() {
 
 void render_top_bar() {
     int i = 0;
+    char meter_str[8];
+    char tempo_str[8];
+    char cursor_str[10];
+    char duration_str[5];
+    char count_str[5];
     clear_box(0, 0, 80, 1);
     sprintf(meter_str, "%02d/%02d ", meter_num, meter_dnm);
     sprintf(tempo_str, "%03d   ", tempo);
     sprintf(cursor_str, "%04d:%03d", (cursor_beat / steps_per_beat) / meter_num, (cursor_beat / steps_per_beat) % meter_num);
     sprintf(duration_str, "  %02d", cursor_duration);
+    sprintf(count_str ,"%04d", note_count);
     while(i < 8 && filename_str[i] != 0) {
         i++;
     }
@@ -216,6 +219,7 @@ void render_top_bar() {
     write_string(".MZ", i, 0, 3, 0);
     if(file_dirty)
         write_string("*", i+3, 0, 1, 0);
+    write_string(count_str, 16, 0, 4, 0);
     write_string("1234567890", 24 , 0, 10, 0);
     write_string(duration_str, 36, 0, 4, 0);
     write_string(meter_str, 56, 0, 6, 0);
@@ -355,6 +359,7 @@ void load_song() {
     if(read_ptr == NULL) return;
     for(i = 0; i < song_buf_size; i++) {
         song_buf[i].channel = 0;
+        note_count--;
     }
     printf("song memory cleared, let's begin\n");
 
@@ -370,6 +375,7 @@ void load_song() {
     for(i = 0; i < song_buf_size; i++) {
         if(fread(&song_buf[i], sizeof(note), 1, read_ptr) == 0) break;
     }
+    note_count = i;
     printf("loaded %d notes\n", i);
     fclose(read_ptr);
 
@@ -564,11 +570,11 @@ int main(int argc, char** argv) {
                 switch_mode(PLAY_MODE);
                 if(shift_held) scroll_beat = 0;
                 cursor_beat = scroll_beat;
+                sort_song();
                 fast_timer = 0;
                 steptimer = 0;
                 playindex = 0;
-                sort_song();
-                file_dirty = 1;
+                file_dirty = 1;;
             }
         } else if(interface_mode == PARAMS_MODE) {
             if(just_pressed(KEY_TAB)) {
@@ -624,10 +630,10 @@ int main(int argc, char** argv) {
                 switch_mode(COMPOSE_MODE);
             }
 
-            while(song_buf[playindex].step < cursor_beat && song_buf[playindex].channel != 0) {
+            while((song_buf[playindex].step < cursor_beat) && (song_buf[playindex].channel != 0)) {
                 playindex++;
             }
-            while(song_buf[playindex].step == cursor_beat && song_buf[playindex].channel != 0) {
+            while((song_buf[playindex].step == cursor_beat) && (song_buf[playindex].channel != 0)) {
                 Sb_FM_Key_Off(song_buf[playindex].channel-1);
                 Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
                 playindex++;
@@ -637,13 +643,6 @@ int main(int argc, char** argv) {
             if(song_buf[playindex].channel == 0) {
                     switch_mode(COMPOSE_MODE);
             }
-
-            steptimer += frame_duration;
-            /*fast_timer increments by tempo every 80us*/
-            /*120 should give 2 beats per SECOND
-            6250 increments happen in a half SECOND
-            so 750000 is the number to reach per step*/
-
 
             if(fast_timer > 8736) {
                 fast_timer -= 8736;
