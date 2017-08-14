@@ -691,6 +691,7 @@ int main(int argc, char** argv) {
         if(redraw_quit) render_quit_confirm();
     }
     deinit_keyboard();
+    set_timer_divisor(0);
     setvect(8, oldtimer);
     for(i = 0; i < 25; i ++) {
         printf("\n");
