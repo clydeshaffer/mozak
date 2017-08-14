@@ -34,6 +34,32 @@ const char *param_names[] = {
 int prev_mode = COMPOSE_MODE;
 int interface_mode = COMPOSE_MODE;
 
+unsigned long fast_timer = 0;
+
+static void interrupt (far *oldtimer)(void);
+
+int tempo = 120;
+
+unsigned char timer_count = 0;
+
+void set_timer_divisor(unsigned short d) {
+    unsigned char upper = (unsigned char) (d >> 8);
+    unsigned char lower = (unsigned char) (d & 0xFF);
+    outportb(0x43, 0x36);
+    outportb(0x40, lower);
+    outportb(0x40, upper);
+}
+
+void interrupt sb_timer() {
+    fast_timer+=tempo;
+    timer_count++;
+    if(timer_count % 8 == 0) oldtimer();
+    else {
+        asm mov al, 20h
+        asm out 20h, al
+    }
+}
+
 void switch_mode(int state) {
     if(state == interface_mode) return;
     prev_mode = interface_mode;
@@ -42,7 +68,6 @@ void switch_mode(int state) {
 
 int meter_num = 4;
 int meter_dnm = 4;
-int tempo = 120;
 
 int file_dirty = 0;
 
@@ -353,6 +378,8 @@ void load_song() {
     }
 }
 
+
+
 int main(int argc, char** argv) {
     int i, redraw_roll = 0, 
             redraw_top = 0, 
@@ -392,8 +419,13 @@ int main(int argc, char** argv) {
     Sb_FM_Reset();
 
     WriteFM(0, 1, 1 << 5);
-    WriteFM(0, 2, 0);
-    WriteFM(0, 4, 1);
+
+    oldtimer = getvect(8);
+    setvect(8, sb_timer);
+    set_timer_divisor(8192);
+    WriteFM(0, 2, 0x00);
+    WriteFM(0, 4, 1 & (1 << 7));
+
 
     for(i = 0; i < 10; i++) {
         FM_Instrument defaultstrument = {
@@ -532,6 +564,7 @@ int main(int argc, char** argv) {
                 switch_mode(PLAY_MODE);
                 if(shift_held) scroll_beat = 0;
                 cursor_beat = scroll_beat;
+                fast_timer = 0;
                 steptimer = 0;
                 playindex = 0;
                 sort_song();
@@ -598,15 +631,22 @@ int main(int argc, char** argv) {
                 Sb_FM_Key_Off(song_buf[playindex].channel-1);
                 Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
                 playindex++;
-                if(song_buf[playindex].channel == 0) {
+                
+            }
+
+            if(song_buf[playindex].channel == 0) {
                     switch_mode(COMPOSE_MODE);
-                    break;
-                }
             }
 
             steptimer += frame_duration;
-            if(steptimer > 1092 / tempo) {
-                steptimer -= (1092 / tempo);
+            /*fast_timer increments by tempo every 80us*/
+            /*120 should give 2 beats per SECOND
+            6250 increments happen in a half SECOND
+            so 750000 is the number to reach per step*/
+
+
+            if(fast_timer > 8736) {
+                fast_timer -= 8736;
                 cursor_beat++;
                 scroll_beat++;
                 redraw_top = 1;
@@ -641,6 +681,7 @@ int main(int argc, char** argv) {
         if(redraw_quit) render_quit_confirm();
     }
     deinit_keyboard();
+    setvect(8, oldtimer);
     for(i = 0; i < 25; i ++) {
         printf("\n");
     }
