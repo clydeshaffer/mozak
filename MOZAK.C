@@ -17,7 +17,7 @@
 #define PARAMS_COUNT 6
 #define OPERATOR_COUNT 2
 
-char format_version = 0x02;
+char format_version = 0x03;
 
 char keystates[32];
 char old_keystates[32];
@@ -39,7 +39,7 @@ unsigned long fast_timer = 0;
 static void interrupt (far *oldtimer)(void);
 
 int tempo = 120;
-
+unsigned char steps_per_beat = 1;
 unsigned char timer_count = 0;
 
 void set_timer_divisor(unsigned short d) {
@@ -51,7 +51,7 @@ void set_timer_divisor(unsigned short d) {
 }
 
 void interrupt sb_timer() {
-    fast_timer+=tempo;
+    fast_timer+=tempo*steps_per_beat;
     timer_count++;
     if(timer_count % 8 == 0) oldtimer();
     else {
@@ -71,7 +71,6 @@ int meter_dnm = 4;
 
 int file_dirty = 0;
 
-int steps_per_beat = 1;
 int scroll_beat = 0;
 int cursor_beat = 0;
 int cursor_channel = 1;
@@ -220,6 +219,7 @@ void render_top_bar() {
     if(file_dirty)
         write_string("*", i+3, 0, 1, 0);
     write_string(count_str, 16, 0, 4, 0);
+    charat(20, 0) = NOTE_CHAR;
     write_string("1234567890", 24 , 0, 10, 0);
     write_string(duration_str, 36, 0, 4, 0);
     write_string(meter_str, 56, 0, 6, 0);
@@ -259,6 +259,8 @@ void render_params_window() {
     paint_box(64, 1, 16, 24, 0x30);
     draw_box(64, 1, 16, 24, 0x33 + cursor_channel);
 
+    cursor_param = cursor_param % (OPERATOR_COUNT * PARAMS_COUNT);
+
     for(i = 0; i < PARAMS_COUNT; i ++) {
         write_string(param_names[i], 66, 2 + i * (OPERATOR_COUNT + 1), 8, (cursor_param / OPERATOR_COUNT == i) ? 0x1F : 0x30);
         for(j = 0; j < OPERATOR_COUNT; j++) {
@@ -269,6 +271,10 @@ void render_params_window() {
             charat(77, 2 + i * (OPERATOR_COUNT + 1) + j) = hex_char(*inst_param % 16);
         }
     }
+}
+
+void render_options_window() {
+
 }
 
 void adjust_instrument(int amount) {
@@ -333,6 +339,7 @@ void save_song() {
     write_ptr = fopen(filename_str_ext, "wb");
     fwrite(&format_version, sizeof(format_version), 1, write_ptr);
     fwrite(&tempo, sizeof(tempo), 1, write_ptr);
+    fwrite(&steps_per_beat, sizeof(steps_per_beat), 1, write_ptr);
     fwrite(instruments, sizeof(FM_Instrument), 10, write_ptr);
     fwrite(song_buf, sizeof(note), i, write_ptr);
     fclose(write_ptr);
@@ -343,7 +350,7 @@ void load_song() {
     FILE *read_ptr = NULL;
     char filename_str_ext[12];
     int i;
-    char loadversion;
+    unsigned char loadversion;
     printf("lets load the song\n");
     for(i = 0; i < 8; i++) {
         if(filename_str[i] == 0) break;
@@ -370,6 +377,10 @@ void load_song() {
     and only load params from correct versions*/
 
     fread(&tempo, sizeof(tempo), 1, read_ptr);
+
+    if(loadversion >= 0x03) {
+        fread(&steps_per_beat, sizeof(steps_per_beat), 1, read_ptr);
+    }
 
     fread(instruments, sizeof(FM_Instrument), 10, read_ptr);
     for(i = 0; i < song_buf_size; i++) {
