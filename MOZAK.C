@@ -17,7 +17,9 @@
 #define PARAMS_COUNT 6
 #define OPERATOR_COUNT 2
 
-char format_version = 0x03;
+#define MAX_COPY_NOTES 64
+
+char format_version = 0x04;
 
 char keystates[32];
 char old_keystates[32];
@@ -72,12 +74,14 @@ int meter_dnm = 4;
 int file_dirty = 0;
 
 int scroll_beat = 0;
-int cursor_beat = 0;
+int cursor_beat = 0, select_beat = 0;
+int lowest_copied_pitch = 0;
 int cursor_channel = 1;
 int highlight_channels=0;
-int cursor_note = 57;
+int cursor_note = 57, select_note = 57;;
 int cursor_duration = 1;
 int cursor_param = 0;
+
 
 int black_notes[12] = {0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0};
 
@@ -92,8 +96,12 @@ typedef struct note {
 } note;
 
 note song_buf[512];
-int song_buf_size = 512;
-int note_count = 0;
+note copy_buf[MAX_COPY_NOTES];
+unsigned int song_buf_size = 512;
+unsigned int note_count = 0; 
+unsigned int copy_count = 0;
+
+int noteoff_steps[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 FM_Instrument instruments[10];
 
@@ -145,9 +153,33 @@ void create_cursor_note() {
     }
 }
 
+void draw_selection() {
+    int note_begin = cursor_note, note_end = select_note,
+        step_begin = cursor_beat, step_end = select_beat,
+        i, k;
+    if(select_note < cursor_note) {
+        note_begin = select_note;
+        note_end = cursor_note;
+    }
+    if(select_beat < cursor_beat) {
+        step_begin = select_beat;
+        step_end = cursor_beat;
+    }
+
+    if(step_begin < scroll_beat) step_begin = scroll_beat;
+    if(step_end > scroll_beat+23) step_end = scroll_beat+23;
+
+    for(i = step_begin; i <= step_end; i++) {
+        for(k = note_begin; k <= note_end; k++) {
+            colorat(k - BOTTOM_NOTE, i - scroll_beat + 2) &= 0x0F;
+            colorat(k - BOTTOM_NOTE, i - scroll_beat + 2) |= 0x20;
+        }
+    }
+}
+
 void render_piano_roll() {
     /*starting at line 2, draw dotted lines every (meter_num * steps_per_beat) rows*/
-    int x, y, i;
+    int x, y, i, k;
     clear_box(0, 2, 80, 23);
     paint_box(0, 2, 80, 23, 0x07);
     for(y = 2 - (scroll_beat % (meter_num * steps_per_beat)); y < 25; y+= meter_num * steps_per_beat) {
@@ -160,8 +192,8 @@ void render_piano_roll() {
     highlight_channels = 0;
     for(i = 0; i < song_buf_size; i++) {
         if(song_buf[i].channel != 0) {
-            if(song_buf[i].step >= scroll_beat) {
-                if(song_buf[i].step < scroll_beat+23) {
+            if(song_buf[i].step < scroll_beat+23) {
+                if(song_buf[i].step >= scroll_beat) {
                     if(song_buf[i].pitch > BOTTOM_NOTE && song_buf[i].pitch < BOTTOM_NOTE+80) {
                         x = song_buf[i].pitch - BOTTOM_NOTE;
                         y = 2 + song_buf[i].step - scroll_beat;
@@ -176,10 +208,24 @@ void render_piano_roll() {
                         } 
                     }
                 }
+                if((song_buf[i].step + song_buf[i].duration) >= scroll_beat) {
+                    for(k = 1; k < song_buf[i].duration; k++) {
+                        x = song_buf[i].pitch - BOTTOM_NOTE;
+                        y = 2 + song_buf[i].step - scroll_beat + k;
+                        if(y > 1 && y < 80) {
+                            if(charat(x,y) != NOTE_CHAR && charat(x,y) != NOTE_CHAR+1) {
+                                charat(x,y) = 0xDD;
+                                colorat(x, y) = 0x03 + song_buf[i].channel;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
+    
+    draw_selection();
     if(cursor_beat >= scroll_beat && cursor_beat < scroll_beat+23) {
         colorat(cursor_note - BOTTOM_NOTE, cursor_beat - scroll_beat + 2) &= 0x0F;
         colorat(cursor_note - BOTTOM_NOTE, cursor_beat - scroll_beat + 2) |= 0x10;
@@ -210,7 +256,7 @@ void render_top_bar() {
     sprintf(tempo_str, "%03d   ", tempo);
     sprintf(cursor_str, "%04d:%03d", (cursor_beat / steps_per_beat) / meter_num, (cursor_beat / steps_per_beat) % meter_num);
     sprintf(duration_str, "  %02d", cursor_duration);
-    sprintf(count_str ,"%04d", note_count);
+    sprintf(count_str ,"%04u", note_count);
     while(i < 8 && filename_str[i] != 0) {
         i++;
     }
@@ -237,7 +283,7 @@ void render_top_bar() {
     colorat(24 + (cursor_channel+9) % 10, 0) += 0x80;
 }
 
-int render_quit_confirm() {
+void render_quit_confirm() {
     /*26 chars long*/
     char confirm_text[] = "QUIT WITHOUT SAVING? (Y/N)";
     draw_box(26, 11, 28, 3, 0x30);
@@ -251,6 +297,16 @@ char hex_char(int num) {
         return 'A' + (num - 10);
     }
 }
+
+void render_debug_number(unsigned char number) {
+    char num_txt[8];
+    draw_box(0, 22, 4, 3, 0x30);
+    paint_box(0, 22, 4, 3, 0x30);
+    charat(1, 23) = hex_char(number >> 4);
+    charat(2, 23) = hex_char(number % 16);
+}
+
+
 
 void render_params_window() {
     int i, j;
@@ -274,7 +330,7 @@ void render_params_window() {
 }
 
 void render_options_window() {
-
+    
 }
 
 void adjust_instrument(int amount) {
@@ -296,6 +352,7 @@ void swap_notes(int a, int b) {
     note holder = song_buf[b];
     song_buf[b] = song_buf[a];
     song_buf[a] = holder;
+    file_dirty = 1;
 }
 
 /*1 if a>b 0 otherwise*/
@@ -320,6 +377,21 @@ void sort_song() {
     }
 }
 
+void clean_song() {
+    unsigned int i;
+    for(i=0; i<song_buf_size;i++) {
+        if(song_buf[i].channel > 10U) {
+            song_buf[i].channel = 0;
+        }
+    }
+    sort_song();
+    note_count=0;
+    for(i = 0; (i < song_buf_size) && song_buf[i].channel; i++) {
+        note_count++;
+    }
+}
+
+
 void save_song() {
     FILE *write_ptr;
     char filename_str_ext[12];
@@ -333,15 +405,13 @@ void save_song() {
     filename_str_ext[i++] = 'Z';
     filename_str_ext[i++] = 0;
     sort_song();
-    for(i = 0; i < song_buf_size; i ++) {
-        if(song_buf[i].channel == 0) break;
-    }
     write_ptr = fopen(filename_str_ext, "wb");
-    fwrite(&format_version, sizeof(format_version), 1, write_ptr);
+    fwrite(&format_version, sizeof(format_version), 1, write_ptr); 
+    fwrite(&note_count, sizeof(note_count), 1, write_ptr);
     fwrite(&tempo, sizeof(tempo), 1, write_ptr);
     fwrite(&steps_per_beat, sizeof(steps_per_beat), 1, write_ptr);
     fwrite(instruments, sizeof(FM_Instrument), 10, write_ptr);
-    fwrite(song_buf, sizeof(note), i, write_ptr);
+    fwrite(song_buf, sizeof(note), note_count, write_ptr);
     fclose(write_ptr);
     file_dirty = 0;
 }
@@ -366,7 +436,6 @@ void load_song() {
     if(read_ptr == NULL) return;
     for(i = 0; i < song_buf_size; i++) {
         song_buf[i].channel = 0;
-        note_count--;
     }
     printf("song memory cleared, let's begin\n");
 
@@ -376,6 +445,12 @@ void load_song() {
     /*REMEMBER! When adding things here, increment version
     and only load params from correct versions*/
 
+    if(loadversion >= 0x04) {
+        fread(&note_count, sizeof(note_count), 1, read_ptr);
+    } else {
+        note_count = song_buf_size;
+    }
+
     fread(&tempo, sizeof(tempo), 1, read_ptr);
 
     if(loadversion >= 0x03) {
@@ -383,8 +458,11 @@ void load_song() {
     }
 
     fread(instruments, sizeof(FM_Instrument), 10, read_ptr);
-    for(i = 0; i < song_buf_size; i++) {
+    for(i = 0; i < note_count; i++) {
         if(fread(&song_buf[i], sizeof(note), 1, read_ptr) == 0) break;
+    }
+    if(i < note_count) {
+        song_buf[i].channel = 0;
     }
     note_count = i;
     printf("loaded %d notes\n", i);
@@ -393,9 +471,58 @@ void load_song() {
     for(i = 0; i < 10; i ++) {
         Sb_FM_Set_Voice(i, &instruments[i]);
     }
+    clean_song();
+    file_dirty = 0;
 }
 
+void copy_notes() {
+    int note_begin = cursor_note, note_end = select_note,
+        step_begin = cursor_beat, step_end = select_beat,
+        i;
+    if(select_note < cursor_note) {
+        note_begin = select_note;
+        note_end = cursor_note;
+    }
+    if(select_beat < cursor_beat) {
+        step_begin = select_beat;
+        step_end = cursor_beat;
+    }
+    copy_count = 0;
+    lowest_copied_pitch = 999;
+    for(i = 0; (i < note_count) && (copy_count < MAX_COPY_NOTES); i ++) {
+        unsigned int notestep = song_buf[i].step;
+        unsigned int notepitch = song_buf[i].pitch;
+        if(notestep >= step_begin && notestep <= step_end) {
+            if(notepitch >= note_begin && notepitch <= note_end) {
+                copy_buf[copy_count] = song_buf[i];
+                copy_buf[copy_count].step -= step_begin;
+                if(notepitch < lowest_copied_pitch)
+                    lowest_copied_pitch = notepitch;
+                copy_count++;
+            }
+        }
+    }
+    if(lowest_copied_pitch == 999)
+        lowest_copied_pitch = 0;
+}
 
+void paste_notes() {
+    int i, newind;
+    for(i = 0; i < copy_count; i++) {
+        note copynote = copy_buf[i];
+        copynote.pitch += (cursor_note - lowest_copied_pitch);
+        copynote.step += cursor_beat;
+
+        newind = get_note_index(copynote.step, copynote.channel);
+        if(newind != -1) {
+            song_buf[newind] = copynote;
+        } else {
+            create_note(copynote);
+        }
+    }
+    clean_song();
+    file_dirty = 1;
+}
 
 int main(int argc, char** argv) {
     int i, redraw_roll = 0, 
@@ -404,10 +531,12 @@ int main(int argc, char** argv) {
             redraw_params = 0, 
             redraw_quit = 0,
             steptimer = 0, 
-            playindex = 0;
+            playindex = 0,
+            redraw_debug = 0;
     unsigned short start;
     unsigned short *my_clock = (unsigned short *)0x0000046C;
     unsigned short frame_duration;
+    unsigned char debug_char = 0;
     int do_exit = 0;
 
     start = *my_clock;
@@ -468,12 +597,13 @@ int main(int argc, char** argv) {
 
     clear_keybuf(keystates);
     while(!do_exit) {
-        int shift_held;
+        int shift_held, v_held;
         frame_duration = (*my_clock - start); /*IN UNITS OF 18.2 PER SECOND*/
         start = *my_clock;
         memcpy(old_keystates, keystates, 32);
         get_keys_hit(keystates);
         shift_held = test_keybuf(keystates, KEY_LSHIFT) || test_keybuf(keystates, KEY_RSHIFT);
+        v_held = test_keybuf(keystates, KEY_V);
         redraw_top = 0;
         redraw_roll = 0;
         redraw_keys = 0;
@@ -487,24 +617,32 @@ int main(int argc, char** argv) {
                 }
             }
             if(just_pressed(KEY_UP)) {
-                    if(cursor_beat > 0) {
-                        cursor_beat--;
-                        if(shift_held) {
-                            cursor_beat -= meter_num - 1;
-                            if(cursor_beat < 0) cursor_beat = 0;
-                        }
-                        if(cursor_beat < scroll_beat) {
-                            scroll_beat = cursor_beat;
-                        }
-                        redraw_roll = 1;
-                        redraw_top = 1;
+                if(cursor_beat > 0) {
+                    cursor_beat--;
+                    if(shift_held) {
+                        cursor_beat -= meter_num - 1;
+                        if(cursor_beat < 0) cursor_beat = 0;
                     }
+                    if(cursor_beat < scroll_beat) {
+                        scroll_beat = cursor_beat;
+                    }
+                    redraw_roll = 1;
+                    redraw_top = 1;
+                }
+                if(!v_held) {
+                    select_note = cursor_note;
+                    select_beat = cursor_beat;
+                }
             }
             if(just_pressed(KEY_DOWN)) {
                 cursor_beat++;
                 if(shift_held) cursor_beat+= meter_num - 1;
                 if(cursor_beat >= scroll_beat+23) {
                     scroll_beat = cursor_beat - 22;
+                }
+                if(!v_held) {
+                    select_note = cursor_note;
+                    select_beat = cursor_beat;
                 }
                 redraw_roll = 1;
                 redraw_top = 1;
@@ -513,6 +651,10 @@ int main(int argc, char** argv) {
                 cursor_note--;
                 if(shift_held) cursor_note -= 11;
                 if(cursor_note < BOTTOM_NOTE) cursor_note = BOTTOM_NOTE;
+                if(!v_held) {
+                    select_note = cursor_note;
+                    select_beat = cursor_beat;
+                }
                 redraw_roll = 1;
                 redraw_top = 1;
                 redraw_keys = 1;
@@ -521,30 +663,39 @@ int main(int argc, char** argv) {
                 cursor_note++;
                 if(shift_held) cursor_note += 11;
                 if(cursor_note >= BOTTOM_NOTE + 80) cursor_note = BOTTOM_NOTE + 79;
+                if(!v_held) {
+                    select_note = cursor_note;
+                    select_beat = cursor_beat;
+                }
                 redraw_roll = 1;
                 redraw_top = 1;
                 redraw_keys = 1;
             }
 
             if(just_pressed(KEY_EQUALS)) {
-                if(shift_held) {
-                    if(tempo < 999) tempo++;
-                } else {
-                    if(cursor_duration < 16) cursor_duration++;
-                }
-                file_dirty = 1;
+                if(cursor_duration < 16) cursor_duration++;
                 redraw_top = 1;
             }
 
             if(just_pressed(KEY_MINUS)) {
-                if(shift_held) {
-                    if(tempo > 10) tempo --;
-                } else {
-                    if(cursor_duration > 1) cursor_duration--;
-                }
+                if(cursor_duration > 1) cursor_duration--;
+                redraw_top = 1;
+            }
+
+            if(just_pressed(KEY_RBRAK)) {
+                tempo += shift_held ? 10 : 1;
+                if(tempo > 999) tempo = 999;
                 file_dirty = 1;
                 redraw_top = 1;
             }
+
+            if(just_pressed(KEY_LBRAK)) {
+                tempo -= shift_held ? 10 : 1;
+                if(tempo < 40) tempo = 40;
+                file_dirty = 1;
+                redraw_top = 1;
+            }
+
 
             if(just_pressed(KEY_SPACE)) {
                 int noteind = get_note_index(cursor_beat, cursor_channel);
@@ -555,6 +706,7 @@ int main(int argc, char** argv) {
                 } else {
                     if(cursor_note == song_buf[noteind].pitch) {
                         song_buf[noteind].channel = 0;
+                        note_count--;
                     } else {
                         song_buf[noteind].pitch = cursor_note;
                         Sb_FM_Key_Off(cursor_channel-1);
@@ -565,6 +717,17 @@ int main(int argc, char** argv) {
                 redraw_roll = 1;
                 redraw_top = 1;
                 file_dirty = 1;
+            }
+
+            if(just_pressed(KEY_P)) {
+                paste_notes();
+                redraw_roll = 1;
+                redraw_top = 1;
+            }
+
+            if(just_pressed(KEY_Y)) {
+                copy_notes();
+                redraw_top = 1;
             }
 
             if(just_pressed(KEY_F2) && file_dirty) {
@@ -581,11 +744,15 @@ int main(int argc, char** argv) {
                 switch_mode(PLAY_MODE);
                 if(shift_held) scroll_beat = 0;
                 cursor_beat = scroll_beat;
+                cursor_beat--;
+                scroll_beat--;
                 sort_song();
                 fast_timer = 0;
                 steptimer = 0;
                 playindex = 0;
-                file_dirty = 1;;
+                for(i = 0; i < 10; i++) {
+                    noteoff_steps[i] = 0;
+                }
             }
         } else if(interface_mode == PARAMS_MODE) {
             if(just_pressed(KEY_TAB)) {
@@ -639,26 +806,38 @@ int main(int argc, char** argv) {
         } else if(interface_mode == PLAY_MODE) {
             if(just_pressed(KEY_ENTER)) {
                 switch_mode(COMPOSE_MODE);
-            }
-
-            while((song_buf[playindex].step < cursor_beat) && (song_buf[playindex].channel != 0)) {
-                playindex++;
-            }
-            while((song_buf[playindex].step == cursor_beat) && (song_buf[playindex].channel != 0)) {
-                Sb_FM_Key_Off(song_buf[playindex].channel-1);
-                Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
-                playindex++;
-                
-            }
-
-            if(song_buf[playindex].channel == 0) {
-                    switch_mode(COMPOSE_MODE);
+                for(i = 0; i < 10; i ++) {
+                    Sb_FM_Key_Off(i);
+                }
             }
 
             if(fast_timer > 8736) {
                 fast_timer -= 8736;
                 cursor_beat++;
                 scroll_beat++;
+                select_beat = cursor_beat;
+                for(i = 0; i < 10; i ++) {
+                    if(noteoff_steps[i] > 0) {
+                        noteoff_steps[i] --;
+                        if(noteoff_steps[i] == 0) {
+                            Sb_FM_Key_Off(i);
+                        }
+                    }
+                }
+                while((song_buf[playindex].step < cursor_beat) && (song_buf[playindex].channel != 0)) {
+                    playindex++;
+                }
+                while((song_buf[playindex].step == cursor_beat) && (song_buf[playindex].channel != 0)) {
+                    Sb_FM_Key_Off(song_buf[playindex].channel-1);
+                    Sb_FM_Key_On(song_buf[playindex].channel-1, note_fnums[song_buf[playindex].pitch], note_octaves[song_buf[playindex].pitch]);
+                    noteoff_steps[song_buf[playindex].channel-1] = song_buf[playindex].duration;
+                    playindex++;
+                    
+                }
+
+                if(song_buf[playindex].channel == 0) {
+                        switch_mode(COMPOSE_MODE);
+                }
                 redraw_top = 1;
                 redraw_roll = 1;
             }
@@ -689,6 +868,7 @@ int main(int argc, char** argv) {
         if(redraw_keys) render_piano_keyboard();
         if(redraw_params) render_params_window();
         if(redraw_quit) render_quit_confirm();
+        if(redraw_debug) render_debug_number(debug_char);
     }
     deinit_keyboard();
     set_timer_divisor(0);
