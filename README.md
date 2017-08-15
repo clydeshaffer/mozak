@@ -64,3 +64,5 @@ the DOS sound blaster tracker no one asked for
 |left/right + shift|adjust selected byte by 0x10|
 |up/down arrows|switch between parameters|
 |spacebar | play note on current instrument|
+
+Reading Jeffrey S. Lee's [document](http://www.shipbrook.net/jeff/sb.html) on programming the SoundBlaster/AdLib FM chip will be helpful in making sense of Instrument Edit Mode
