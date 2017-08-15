@@ -30,7 +30,7 @@ the DOS sound blaster tracker no one asked for
 
 |Key|Action|
 |:--|-----:|
-|Esc|exit the program|
+|Esc|exit the program (now with confirmation if not saved)|
 
 ### Compose mode
 
@@ -56,8 +56,11 @@ the DOS sound blaster tracker no one asked for
 
 ### Instrument Edit mode
 
+
 |Key|Action|
 |:--|-----:|
 |numbers 0-9|select channel|
-|left/right arrows|edit selected parameter|
+|left/right arrows|adjust selected byte by 0x01|
+|left/right + shift|adjust selected byte by 0x10|
 |up/down arrows|switch between parameters|
+|spacebar | play note on current instrument|
